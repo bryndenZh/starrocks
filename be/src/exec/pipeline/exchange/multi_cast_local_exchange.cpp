@@ -133,7 +133,11 @@ StatusOr<ChunkPtr> InMemoryMultiCastLocalExchanger::pull_chunk(RuntimeState* sta
     Cell* cell = _progress[mcast_consumer_index];
     if (cell->next == nullptr) {
         if (_opened_sink_number == 0) return Status::EndOfFile("mcast_local_exchanger eof");
-        return Status::InternalError("unreachable in multicast local exchanger");
+        // With DOP > 1, multiple drivers share the same consumer index.
+        // can_pull_chunk may return true for several drivers, but by the time
+        // a driver actually calls pull_chunk, another driver may have already
+        // consumed the available chunk. Return nullptr to let the driver retry.
+        return nullptr;
     }
     cell = cell->next;
     VLOG_FILE << "MultiCastLocalExchanger: return chunk to " << mcast_consumer_index

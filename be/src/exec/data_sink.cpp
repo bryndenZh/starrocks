@@ -69,6 +69,10 @@
 #include "exec/pipeline/sink/table_function_table_sink_operator.h"
 #include "exec/tablet_sink.h"
 #include "exprs/expr.h"
+#include "exprs/runtime_filter_bank.h"
+#include "runtime/exec_env.h"
+#include "runtime/runtime_filter_cache.h"
+#include "service/backend_options.h"
 #include "formats/csv/csv_file_writer.h"
 #include "gen_cpp/InternalService_types.h"
 #include "pipeline/exchange/multi_cast_local_exchange.h"
@@ -370,12 +374,43 @@ Status DataSink::decompose_data_sink_to_pipeline(pipeline::PipelineBuilderContex
             const auto& sender = sinks[i];
             OpFactories ops;
             // it's okay to set arbitrary dop.
-            const size_t dop = 1;
+            const size_t dop = context->degree_of_parallelism();
             auto& t_stream_sink = t_multi_case_stream_sink.sinks[i];
 
-            // source op
+            // Deserialize per-consumer conjuncts for filter push-down
+            std::vector<ExprContext*> conjunct_ctxs;
+            if (t_stream_sink.__isset.conjuncts && !t_stream_sink.conjuncts.empty()) {
+                RETURN_IF_ERROR(Expr::create_expr_trees(runtime_state->obj_pool(), t_stream_sink.conjuncts,
+                                                        &conjunct_ctxs, runtime_state));
+            }
+
+            // source op (with per-consumer conjuncts and runtime filters)
             auto source_op = std::make_shared<MultiCastLocalExchangeSourceOperatorFactory>(
-                    context->next_operator_id(), upstream_plan_node_id, i, mcast_local_exchanger);
+                    context->next_operator_id(), upstream_plan_node_id, i, mcast_local_exchanger,
+                    std::move(conjunct_ctxs));
+
+            if (t_stream_sink.__isset.runtime_filters && !t_stream_sink.runtime_filters.empty()) {
+                auto* pool = runtime_state->obj_pool();
+                auto* rf_collector = pool->add(new RuntimeFilterProbeCollector());
+                TPlanNodeId dest_node_id = t_stream_sink.dest_node_id;
+                for (const auto& rf_desc : t_stream_sink.runtime_filters) {
+                    auto* probe_desc = pool->add(new RuntimeFilterProbeDescriptor());
+                    RETURN_IF_ERROR(probe_desc->init(pool, rf_desc, dest_node_id, runtime_state));
+                    probe_desc->set_probe_plan_node_id(dest_node_id);
+                    rf_collector->add_descriptor(probe_desc);
+                    ExecEnv::GetInstance()->add_rf_event(
+                            {runtime_state->query_id(), rf_desc.filter_id, BackendOptions::get_localhost(),
+                             "REGISTER_MCAST_SOURCE_GRF(dest_node=" + std::to_string(dest_node_id) + ")"});
+                    runtime_state->runtime_filter_port()->add_listener(probe_desc);
+                }
+                int64_t rf_wait_timeout = 0;
+                if (runtime_state->query_options().__isset.runtime_filter_wait_timeout_ms) {
+                    rf_wait_timeout = runtime_state->query_options().runtime_filter_wait_timeout_ms;
+                }
+                rf_collector->set_wait_timeout_ms(rf_wait_timeout);
+                source_op->set_runtime_filter_collector(rf_collector);
+            }
+
             context->inherit_upstream_source_properties(source_op.get(), upstream_source);
             source_op->set_degree_of_parallelism(dop);
             ops.emplace_back(source_op);
@@ -388,7 +423,8 @@ Status DataSink::decompose_data_sink_to_pipeline(pipeline::PipelineBuilderContex
             }
 
             // sink op
-            ops.emplace_back(_create_exchange_sink_operator(context, t_stream_sink, sender.get()));
+            auto exchange_sink = _create_exchange_sink_operator(context, t_stream_sink, sender.get());
+            ops.emplace_back(exchange_sink);
 
             context->add_pipeline(ops);
         }

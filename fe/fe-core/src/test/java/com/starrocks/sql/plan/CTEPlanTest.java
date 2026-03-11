@@ -1092,7 +1092,6 @@ public class CTEPlanTest extends PlanTestBase {
     @ValueSource(ints = {0, 1})
     public void testCTEWithLimitWithoutOrderBy(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
-        // CTE with LIMIT but no ORDER BY should force CTE reuse
         String sql = "with\n"
                 + "cte0 as(select * from t0 limit 10),\n"
                 + "cte1 as(select * from cte0),\n"
@@ -1100,7 +1099,6 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte3 as(select * from cte1 union all select * from cte2)\n"
                 + "select * from cte3;";
         String plan = getFragmentPlan(sql);
-        // Should force CTE reuse because cte0 has LIMIT without ORDER BY
         assertContains(plan, "MultiCastDataSinks");
     }
 
@@ -1109,8 +1107,6 @@ public class CTEPlanTest extends PlanTestBase {
     public void testCTEWithOrderByAndLimit(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
         connectContext.getSessionVariable().setCboCTERuseRatio(1.5);
-        // CTE with ORDER BY and LIMIT should not force CTE reuse via ForceCTEReuseRule
-        // (ORDER BY makes it stable, so the rule won't trigger)
         String sql = "with\n"
                 + "cte0 as(select * from t0 order by v1 limit 10),\n"
                 + "cte1 as(select * from cte0),\n"
@@ -1124,7 +1120,6 @@ public class CTEPlanTest extends PlanTestBase {
     @ValueSource(ints = {0, 1})
     public void testCTEWithLimitWithoutOrderByMultipleConsume(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
-        // CTE with LIMIT without ORDER BY, consumed multiple times, should force reuse
         String sql = "with\n"
                 + "cte0 as(select * from t0 limit 5),\n"
                 + "cte1 as(select * from cte0),\n"
@@ -1132,7 +1127,6 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte3 as(select * from cte0)\n"
                 + "select * from cte1 union all select * from cte2 union all select * from cte3;";
         String plan = getFragmentPlan(sql);
-        // Should force CTE reuse because cte0 has LIMIT without ORDER BY
         assertContains(plan, "MultiCastDataSinks");
     }
 
@@ -1140,14 +1134,12 @@ public class CTEPlanTest extends PlanTestBase {
     @ValueSource(ints = {0, 1})
     public void testCTEWithNonDeterministicAndLimitWithoutOrderBy(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
-        // CTE with both non-deterministic function and LIMIT without ORDER BY
         String sql = "with\n"
                 + "cte0 as(select rand() as r, v1 from t0 limit 10),\n"
                 + "cte1 as(select * from cte0),\n"
                 + "cte2 as(select * from cte0)\n"
                 + "select * from cte1 union all select * from cte2;";
         String plan = getFragmentPlan(sql);
-        // Should force CTE reuse because of both non-deterministic function and LIMIT without ORDER BY
         assertContains(plan, "MultiCastDataSinks");
         assertContains(plan, "rand()");
     }
@@ -1157,8 +1149,6 @@ public class CTEPlanTest extends PlanTestBase {
     public void testCTEWithLimitWithoutOrderBySingleConsume(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
         connectContext.getSessionVariable().setCboCTERuseRatio(0);
-        // CTE with LIMIT without ORDER BY, but only consumed once
-        // Even with single consume, should force reuse due to LIMIT without ORDER BY
         String sql = "with\n"
                 + "cte0 as(select * from t0 limit 10)\n"
                 + "select * from cte0;";
@@ -1170,7 +1160,6 @@ public class CTEPlanTest extends PlanTestBase {
     @ValueSource(ints = {0, 1})
     public void testCTEWithLimitWithoutOrderBySessionVariable(int forceReuseNodeCount) throws Exception {
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
-        // Test with session variable enabled (default)
         connectContext.getSessionVariable().setCboCTEForceReuseLimitWithoutOrderBy(true);
         String sql = "with\n"
                 + "cte0 as(select * from t0 limit 10),\n"
@@ -1178,14 +1167,67 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte2 as(select * from cte0)\n"
                 + "select * from cte1 union all select * from cte2;";
         String plan = getFragmentPlan(sql);
-        // Should force CTE reuse when variable is enabled
         assertContains(plan, "MultiCastDataSinks");
 
-        // Test with session variable disabled
         connectContext.getSessionVariable().setCboCTEForceReuseLimitWithoutOrderBy(false);
         plan = getFragmentPlan(sql);
-        // Should not force CTE reuse when variable is disabled
-        // (CTE reuse decision will be based on other factors like ratio and consume count)
-        // Note: The actual behavior depends on CTE reuse ratio and consume count
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDown(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 union all select * from cte where v2 < 5";
+        String plan = getFragmentPlan(sql);
+
+        assertContains(plan, "CONJUNCTS:");
+        assertNotContains(plan, "SELECT");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownDisabled(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(false);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 union all select * from cte where v2 < 5";
+        String plan = getFragmentPlan(sql);
+
+        assertNotContains(plan, "CONJUNCTS:");
+        assertContains(plan, "SELECT");
+
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownOneConsumerNoFilter(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte union all select * from cte where v1 > 3";
+        String plan = getFragmentPlan(sql);
+
+        int conjunctsCount = StringUtils.countMatches(plan, "CONJUNCTS:");
+        Assertions.assertEquals(1, conjunctsCount,
+                "Expected exactly one CONJUNCTS in MultiCastDataSinks, got " + conjunctsCount);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownWithLimit(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 limit 10 union all select * from cte where v2 < 5";
+        String plan = getFragmentPlan(sql);
+
+        assertContains(plan, "CONJUNCTS:");
     }
 }
