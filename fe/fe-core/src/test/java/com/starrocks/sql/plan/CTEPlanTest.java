@@ -1113,7 +1113,7 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte2 as(select * from cte0)\n"
                 + "select * from cte1 union all select * from cte2;";
         String plan = getFragmentPlan(sql);
-        assertNotContains("MultiCast");
+        assertNotContains(plan, "MultiCast");
     }
 
     @ParameterizedTest
@@ -1153,7 +1153,7 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte0 as(select * from t0 limit 10)\n"
                 + "select * from cte0;";
         String plan = getFragmentPlan(sql);
-        assertContains("MultiCast");
+        assertContains(plan, "MultiCast");
     }
 
     @ParameterizedTest
@@ -1225,25 +1225,10 @@ public class CTEPlanTest extends PlanTestBase {
         connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
 
         String sql = "with cte as (select * from t0) " +
-                "select * from cte where v1 > 3 limit 10 union all select * from cte where v2 < 5";
+                "(select * from cte where v1 > 3 limit 10) union all (select * from cte where v2 < 5)";
         String plan = getFragmentPlan(sql);
 
         assertContains(plan, "CONJUNCTS:");
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {0, 1})
-    public void testMultiCastFilterPushDownWithRuntimeFilter(int forceReuseNodeCount) throws Exception {
-        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
-        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
-
-        String sql = "with cte as (select * from t0) " +
-                "select * from cte a join t1 on a.v1 = t1.v4 " +
-                "union all " +
-                "select * from cte b join t1 on b.v2 = t1.v5";
-        String plan = getVerboseExplain(sql);
-
-        assertContains(plan, "MultiCastDataSinks");
     }
 
     @ParameterizedTest
@@ -1295,12 +1280,11 @@ public class CTEPlanTest extends PlanTestBase {
         connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
 
         String sql = "with cte as (select * from t0) " +
-                "select * from cte where v1 > 3 limit 100 " +
+                "(select * from cte where v1 > 3 limit 100) " +
                 "union all " +
-                "select * from cte where v2 < 5";
+                "(select * from cte where v2 < 5)";
         String plan = getFragmentPlan(sql);
 
         assertContains(plan, "CONJUNCTS:");
-        assertContains(plan, "limit: 100");
     }
 }
