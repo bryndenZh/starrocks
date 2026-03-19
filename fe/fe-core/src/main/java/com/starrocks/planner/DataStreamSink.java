@@ -34,7 +34,9 @@
 
 package com.starrocks.planner;
 
+import com.starrocks.planner.expression.ExprToThrift;
 import com.starrocks.sql.ast.expression.Expr;
+import com.starrocks.sql.ast.expression.ExprToSql;
 import com.starrocks.thrift.TDataSink;
 import com.starrocks.thrift.TDataSinkType;
 import com.starrocks.thrift.TDataStreamSink;
@@ -161,9 +163,9 @@ public class DataStreamSink extends DataSink {
                 output.append(", ");
             }
             if (level.equals(TExplainLevel.NORMAL)) {
-                output.append(exprs.get(i).toSql());
+                output.append(ExprToSql.toSql(exprs.get(i)));
             } else {
-                output.append(exprs.get(i).explain());
+                output.append(ExprToSql.explain(exprs.get(i)));
             }
         }
         return output.toString();
@@ -183,7 +185,7 @@ public class DataStreamSink extends DataSink {
             tStreamSink.setLimit(limit);
         }
         if (conjuncts != null && !conjuncts.isEmpty()) {
-            tStreamSink.setConjuncts(Expr.treesToThrift(conjuncts));
+            tStreamSink.setConjuncts(ExprToThrift.treesToThrift(conjuncts));
         }
         if (runtimeFilters != null && !runtimeFilters.isEmpty()) {
             tStreamSink.setRuntime_filters(
