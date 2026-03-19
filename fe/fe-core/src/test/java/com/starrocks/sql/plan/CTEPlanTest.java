@@ -1230,4 +1230,77 @@ public class CTEPlanTest extends PlanTestBase {
 
         assertContains(plan, "CONJUNCTS:");
     }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownWithRuntimeFilter(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte a join t1 on a.v1 = t1.v4 " +
+                "union all " +
+                "select * from cte b join t1 on b.v2 = t1.v5";
+        String plan = getVerboseExplain(sql);
+
+        assertContains(plan, "MultiCastDataSinks");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownVerboseExplain(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 union all select * from cte where v2 < 5";
+        String plan = getVerboseExplain(sql);
+
+        assertContains(plan, "MultiCastDataSinks");
+        assertContains(plan, "Conjuncts:");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownMultiplePredicates(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 and v2 < 10 " +
+                "union all " +
+                "select * from cte where v3 = 1";
+        String plan = getFragmentPlan(sql);
+
+        assertContains(plan, "CONJUNCTS:");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownAllConsumersNoFilter(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte union all select * from cte";
+        String plan = getFragmentPlan(sql);
+
+        assertNotContains(plan, "CONJUNCTS:");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    public void testMultiCastFilterPushDownLimitAlsoPushed(int forceReuseNodeCount) throws Exception {
+        connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(forceReuseNodeCount);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
+
+        String sql = "with cte as (select * from t0) " +
+                "select * from cte where v1 > 3 limit 100 " +
+                "union all " +
+                "select * from cte where v2 < 5";
+        String plan = getFragmentPlan(sql);
+
+        assertContains(plan, "CONJUNCTS:");
+        assertContains(plan, "limit: 100");
+    }
 }
