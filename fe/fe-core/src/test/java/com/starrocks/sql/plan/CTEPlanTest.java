@@ -1115,7 +1115,8 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte2 as(select * from cte0)\n"
                 + "select * from cte1 union all select * from cte2;";
         String plan = getFragmentPlan(sql);
-        assertNotContains(plan, "MultiCast");
+        assertContains(plan, "TOP-N");
+        assertContains(plan, "limit: 10");
     }
 
     @ParameterizedTest
@@ -1155,7 +1156,7 @@ public class CTEPlanTest extends PlanTestBase {
                 + "cte0 as(select * from t0 limit 10)\n"
                 + "select * from cte0;";
         String plan = getFragmentPlan(sql);
-        assertContains(plan, "MultiCast");
+        assertContains(plan, "limit: 10");
     }
 
     @ParameterizedTest
