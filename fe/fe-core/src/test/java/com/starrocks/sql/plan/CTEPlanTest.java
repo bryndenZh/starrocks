@@ -53,6 +53,7 @@ public class CTEPlanTest extends PlanTestBase {
     @BeforeEach
     public void alwaysCTEReuse() {
         connectContext.getSessionVariable().setCboCTERuseRatio(0);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(false);
     }
 
     @AfterEach
@@ -60,6 +61,7 @@ public class CTEPlanTest extends PlanTestBase {
         connectContext.getSessionVariable().setCboCTERuseRatio(1.5);
         connectContext.getSessionVariable().setCboCTEForceReuseNodeCount(0);
         connectContext.getSessionVariable().setCboCTEForceReuseLimitWithoutOrderBy(true);
+        connectContext.getSessionVariable().setEnableMultiCastFilterPushDown(true);
     }
 
     @ParameterizedTest
