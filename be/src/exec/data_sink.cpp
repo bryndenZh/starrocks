@@ -51,9 +51,11 @@
 #include "exec/hdfs_scanner/hdfs_scanner_text.h"
 #include "exec/multi_olap_table_sink.h"
 #include "exec/pipeline/exchange/exchange_sink_operator.h"
+#include "exec/pipeline/exchange/multi_cast_local_exchange.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange_sink_operator.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange_source_operator.h"
 #include "exec/pipeline/exchange/sink_buffer.h"
+#include "exec/pipeline/exchange/split_local_exchange.h"
 #include "exec/pipeline/fragment_executor.h"
 #include "exec/pipeline/limit_operator.h"
 #include "exec/pipeline/noop_sink_operator.h"
@@ -69,6 +71,7 @@
 #include "exec/pipeline/sink/table_function_table_sink_operator.h"
 #include "exec/tablet_sink.h"
 #include "exprs/expr.h"
+#include "exprs/expr_factory.h"
 #include "runtime/runtime_filter/runtime_filter_probe.h"
 #include "formats/csv/csv_file_writer.h"
 #include "runtime/exec_env.h"
@@ -376,8 +379,8 @@ Status DataSink::decompose_data_sink_to_pipeline(pipeline::PipelineBuilderContex
             // Deserialize per-consumer conjuncts for filter push-down
             std::vector<ExprContext*> conjunct_ctxs;
             if (t_stream_sink.__isset.conjuncts && !t_stream_sink.conjuncts.empty()) {
-                RETURN_IF_ERROR(Expr::create_expr_trees(runtime_state->obj_pool(), t_stream_sink.conjuncts,
-                                                        &conjunct_ctxs, runtime_state));
+                RETURN_IF_ERROR(ExprFactory::create_expr_trees(runtime_state->obj_pool(), t_stream_sink.conjuncts,
+                                                               &conjunct_ctxs, runtime_state));
             }
 
             // source op (with per-consumer conjuncts and runtime filters)
