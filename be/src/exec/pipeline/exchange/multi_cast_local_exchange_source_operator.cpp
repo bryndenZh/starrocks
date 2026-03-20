@@ -14,7 +14,6 @@
 
 #include "exec/pipeline/exchange/multi_cast_local_exchange_source_operator.h"
 
-#include "base/simd/simd.h"
 #include "exprs/chunk_predicate_evaluator.h"
 
 namespace starrocks::pipeline {
@@ -54,49 +53,18 @@ StatusOr<ChunkPtr> MultiCastLocalExchangeSourceOperator::pull_chunk(RuntimeState
         if (chunk == nullptr || chunk->num_rows() == 0) {
             return ret;
         }
-        size_t num_rows = chunk->num_rows();
 
-        ChunkUniquePtr owned;
+        // Clone first: the chunk is shared across multicast consumers and must not be modified in place.
+        auto owned = chunk->clone_unique();
 
         if (has_conjuncts) {
-            FilterPtr filter;
-            RETURN_IF_ERROR(ChunkPredicateEvaluator::eval_conjuncts(_conjunct_ctxs, chunk.get(), &filter, false));
-
-            if (filter == nullptr) {
-                if (has_rf) {
-                    owned = chunk->clone_unique();
-                }
-            } else {
-                size_t true_count = SIMD::count_nonzero(*filter);
-                if (true_count == num_rows) {
-                    if (has_rf) {
-                        owned = chunk->clone_unique();
-                    }
-                } else if (true_count == 0) {
-                    return ChunkPtr(chunk->clone_empty(0));
-                } else {
-                    owned = chunk->clone_empty(0);
-                    std::vector<uint32_t> selection;
-                    selection.reserve(true_count);
-                    for (uint32_t i = 0; i < filter->size(); i++) {
-                        if ((*filter)[i]) selection.push_back(i);
-                    }
-                    owned->append_selective(*chunk, selection.data(), 0, selection.size());
-                }
-            }
+            RETURN_IF_ERROR(ChunkPredicateEvaluator::eval_conjuncts(_conjunct_ctxs, owned.get()));
         }
-
         if (has_rf) {
-            if (owned == nullptr) {
-                owned = chunk->clone_unique();
-            }
             eval_runtime_bloom_filters(owned.get());
         }
 
-        if (owned != nullptr) {
-            ChunkPtr result(owned.release());
-            return result;
-        }
+        return ChunkPtr(owned.release());
     }
 
     return ret;
@@ -112,18 +80,12 @@ Status MultiCastLocalExchangeSourceOperatorFactory::prepare(RuntimeState* state)
         RETURN_IF_ERROR(ctx->prepare(state));
         RETURN_IF_ERROR(ctx->open(state));
     }
-    if (_runtime_filter_collector != nullptr) {
-        RETURN_IF_ERROR(_runtime_filter_collector->prepare(state, _runtime_profile.get()));
-    }
     return Status::OK();
 }
 
 void MultiCastLocalExchangeSourceOperatorFactory::close(RuntimeState* state) {
     for (auto* ctx : _conjunct_ctxs) {
         ctx->close(state);
-    }
-    if (_runtime_filter_collector != nullptr) {
-        _runtime_filter_collector->close(state);
     }
     SourceOperatorFactory::close(state);
 }
