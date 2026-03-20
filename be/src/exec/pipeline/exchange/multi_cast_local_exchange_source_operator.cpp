@@ -14,8 +14,8 @@
 
 #include "exec/pipeline/exchange/multi_cast_local_exchange_source_operator.h"
 
-#include "exec/exec_node.h"
-#include "simd/simd.h"
+#include "base/simd/simd.h"
+#include "exprs/chunk_predicate_evaluator.h"
 
 namespace starrocks::pipeline {
 
@@ -60,7 +60,7 @@ StatusOr<ChunkPtr> MultiCastLocalExchangeSourceOperator::pull_chunk(RuntimeState
 
         if (has_conjuncts) {
             FilterPtr filter;
-            RETURN_IF_ERROR(ExecNode::eval_conjuncts(_conjunct_ctxs, chunk.get(), &filter, false));
+            RETURN_IF_ERROR(ChunkPredicateEvaluator::eval_conjuncts(_conjunct_ctxs, chunk.get(), &filter, false));
 
             if (filter == nullptr) {
                 if (has_rf) {
@@ -108,8 +108,10 @@ bool MultiCastLocalExchangeSourceOperator::has_output() const {
 
 Status MultiCastLocalExchangeSourceOperatorFactory::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(SourceOperatorFactory::prepare(state));
-    RETURN_IF_ERROR(Expr::prepare(_conjunct_ctxs, state));
-    RETURN_IF_ERROR(Expr::open(_conjunct_ctxs, state));
+    for (auto* ctx : _conjunct_ctxs) {
+        RETURN_IF_ERROR(ctx->prepare(state));
+        RETURN_IF_ERROR(ctx->open(state));
+    }
     if (_runtime_filter_collector != nullptr) {
         RETURN_IF_ERROR(_runtime_filter_collector->prepare(state, _runtime_profile.get()));
     }
@@ -117,7 +119,9 @@ Status MultiCastLocalExchangeSourceOperatorFactory::prepare(RuntimeState* state)
 }
 
 void MultiCastLocalExchangeSourceOperatorFactory::close(RuntimeState* state) {
-    Expr::close(_conjunct_ctxs, state);
+    for (auto* ctx : _conjunct_ctxs) {
+        ctx->close(state);
+    }
     if (_runtime_filter_collector != nullptr) {
         _runtime_filter_collector->close(state);
     }
