@@ -73,7 +73,7 @@
 #include "formats/csv/csv_file_writer.h"
 #include "runtime/exec_env.h"
 #include "runtime/runtime_filter_cache.h"
-#include "service/backend_options.h"
+#include "common/system/backend_options.h"
 #include "gen_cpp/InternalService_types.h"
 #include "runtime/blackhole_table_sink.h"
 #include "runtime/data_stream_sender.h"
