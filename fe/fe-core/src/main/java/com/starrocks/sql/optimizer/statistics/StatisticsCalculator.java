@@ -87,6 +87,7 @@ import com.starrocks.sql.optimizer.operator.logical.LogicalIcebergScanOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalIntersectOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalJDBCScanOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalJoinOperator;
+import com.starrocks.sql.optimizer.operator.logical.LogicalFlussScanOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalKuduScanOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalLimitOperator;
 import com.starrocks.sql.optimizer.operator.logical.LogicalMetaScanOperator;
@@ -126,6 +127,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalIcebergMetadataScan
 import com.starrocks.sql.optimizer.operator.physical.PhysicalIcebergScanOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalIntersectOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalJDBCScanOperator;
+import com.starrocks.sql.optimizer.operator.physical.PhysicalFlussScanOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalKuduScanOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalLimitOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalMergeJoinOperator;
@@ -736,6 +738,34 @@ public class StatisticsCalculator extends OperatorVisitor<Void, ExpressionContex
                     optimizerContext, catalogName, table, columnRefOperatorColumnMap, null,
                     node.getPredicate(), -1, TvrTableSnapshot.empty());
             context.setStatistics(stats);
+        }
+
+        return visitOperator(node, context);
+    }
+
+    @Override
+    public Void visitLogicalFlussScan(LogicalFlussScanOperator node, ExpressionContext context) {
+        return computeFlussScanNode(node, context, node.getTable(), node.getColRefToColumnMetaMap());
+    }
+
+    @Override
+    public Void visitPhysicalFlussScan(PhysicalFlussScanOperator node, ExpressionContext context) {
+        return computeFlussScanNode(node, context, node.getTable(), node.getColRefToColumnMetaMap());
+    }
+
+    private Void computeFlussScanNode(Operator node, ExpressionContext context, Table table,
+                                      Map<ColumnRefOperator, Column> columnRefOperatorColumnMap) {
+        if (context.getStatistics() == null) {
+            String catalogName = table.getCatalogName();
+            Statistics stats = GlobalStateMgr.getCurrentState().getMetadataMgr().getTableStatistics(
+                    optimizerContext, catalogName, table, columnRefOperatorColumnMap, null,
+                    node.getPredicate(), node.getLimit(), TvrTableSnapshot.empty());
+            context.setStatistics(stats);
+            if (node.isLogical()) {
+                boolean hasUnknownColumns = stats.getColumnStatistics().values().stream()
+                        .anyMatch(ColumnStatistic::isUnknown);
+                ((LogicalFlussScanOperator) node).setHasUnknownColumn(hasUnknownColumns);
+            }
         }
 
         return visitOperator(node, context);
