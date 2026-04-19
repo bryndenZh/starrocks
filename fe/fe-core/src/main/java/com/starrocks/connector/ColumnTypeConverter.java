@@ -691,7 +691,7 @@ public class ColumnTypeConverter {
 
         @Override
         public Type visit(org.apache.fluss.types.StringType stringType) {
-            return ScalarType.createDefaultCatalogString();
+            return TypeFactory.createDefaultCatalogString();
         }
 
         @Override
@@ -711,7 +711,7 @@ public class ColumnTypeConverter {
 
         @Override
         public Type visit(org.apache.fluss.types.DecimalType decimalType) {
-            return ScalarType.createUnifiedDecimalType(decimalType.getPrecision(), decimalType.getScale());
+            return TypeFactory.createUnifiedDecimalType(decimalType.getPrecision(), decimalType.getScale());
         }
 
         @Override
