@@ -90,12 +90,15 @@ public class FlussMetadata implements ConnectorMetadata {
     private final Map<String, Database> databases = new ConcurrentHashMap<>();
     private final Map<TablePath, Map<String, Partition>> partitionInfos = new ConcurrentHashMap<>();
     private final Map<PredicateSearchKey, List<SourceSplitBase>> flussSplits = new ConcurrentHashMap<>();
+    private final Map<String, String> tableProperties;
 
-    public FlussMetadata(String catalogName, HdfsEnvironment hdfsEnvironment, Connection connection, Admin admin) {
+    public FlussMetadata(String catalogName, HdfsEnvironment hdfsEnvironment, Connection connection, Admin admin,
+                         Map<String, String> tableProperties) {
         this.catalogName = catalogName;
         this.hdfsEnvironment = hdfsEnvironment;
         this.connection = connection;
         this.admin = admin;
+        this.tableProperties = tableProperties;
     }
 
     @Override
@@ -265,6 +268,7 @@ public class FlussMetadata implements ConnectorMetadata {
 
         if (!flussSplits.containsKey(filter)) {
             Map<String, String> properties = new HashMap<>(flussTable.getTableInfo().getProperties().toMap());
+            properties.putAll(tableProperties);
 
             Supplier<Set<org.apache.fluss.metadata.PartitionInfo>> listPartitionSupplier =
                     () -> new LinkedHashSet<>(listFlussPartitions(table));
@@ -286,6 +290,8 @@ public class FlussMetadata implements ConnectorMetadata {
             } catch (Exception e) {
                 LOG.error("Failed to get Fluss splits for table {}.{}.{}.",
                         catalogName, flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), e);
+                throw new StarRocksConnectorException("Failed to get Fluss splits for table %s.%s.%s: %s",
+                        catalogName, flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), e.getMessage());
             }
             if (flussTable.getTableNamePrefix().equals(LAKE_TABLE_SPLITTER)) {
                 splits = splits.stream().filter(sp -> sp instanceof LakeSnapshotSplit)
