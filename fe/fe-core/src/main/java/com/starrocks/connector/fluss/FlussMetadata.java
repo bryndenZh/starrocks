@@ -212,8 +212,15 @@ public class FlussMetadata implements ConnectorMetadata {
                 fullSchema.add(column);
             }
             String comment = tableInfo.getComment().orElse("");
+            Configuration beConf = new Configuration(connection.getConfiguration().toMap());
+            for (Map.Entry<String, String> e : tableInfo.getProperties().toMap().entrySet()) {
+                beConf.setString(e.getKey(), e.getValue());
+            }
+            for (Map.Entry<String, String> e : tableProperties.entrySet()) {
+                beConf.setString(e.getKey(), e.getValue());
+            }
             FlussTable table = new FlussTable(catalogName, dbName, realTblName, fullSchema,
-                    connection.getTable(flussIdentifier), connection.getConfiguration());
+                    connection.getTable(flussIdentifier), beConf);
             table.setComment(comment);
             if (tblName.contains(LAKE_TABLE_SPLITTER)) {
                 table.setTableNamePrefix(LAKE_TABLE_SPLITTER);
