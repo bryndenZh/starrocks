@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -112,8 +113,17 @@ public class FlussSplitScanner extends ConnectorScanner {
 
             initOffHeapTableWriter(requiredTypes, requiredFields, fetchSize);
 
+            String dataLakePrefix = "table.datalake.paimon.";
+            Map<String, String> paimonProps = new HashMap<>();
+            for (Map.Entry<String, String> entry : conf.toMap().entrySet()) {
+                if (entry.getKey().startsWith(dataLakePrefix)) {
+                    paimonProps.put(entry.getKey().substring(dataLakePrefix.length()), entry.getValue());
+                }
+            }
+            Configuration paimonConfig = Configuration.fromMap(paimonProps);
             @SuppressWarnings("unchecked")
-            LakeSource<LakeSplit> lakeSource = (LakeSource<LakeSplit>) (LakeSource<?>) new PaimonLakeSource(null, null);
+            LakeSource<LakeSplit> lakeSource = (LakeSource<LakeSplit>) (LakeSource<?>)
+                    new PaimonLakeSource(paimonConfig, TablePath.of(dbName, tableName));
             SourceSplitSerializer serializer = new SourceSplitSerializer(lakeSource);
             byte[] splitBytes = BASE64_DECODER.decode(splitInfo.getBytes(UTF_8));
             SourceSplitBase split = serializer.deserialize(0, splitBytes);
