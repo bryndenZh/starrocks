@@ -32,10 +32,12 @@ import java.util.stream.Collectors;
 
 public class FlussConnector implements Connector {
     public static final String BOOTSTRAP_SERVERS = "bootstrap.servers";
+    private static final String LAKE_PAIMON_PREFIX = "table.datalake.paimon.";
     private final Connection connection;
     private final Admin admin;
     private final HdfsEnvironment hdfsEnvironment;
     private final String catalogName;
+    private final Map<String, String> tableProperties;
 
     public FlussConnector(ConnectorContext context) {
         this.catalogName = context.getCatalogName();
@@ -58,13 +60,17 @@ public class FlussConnector implements Connector {
             conf.setString(key, properties.get(k));
         }
 
+        this.tableProperties = properties.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(LAKE_PAIMON_PREFIX))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
         this.connection = ConnectionFactory.createConnection(conf);
         this.admin = connection.getAdmin();
     }
 
     @Override
     public ConnectorMetadata getMetadata() {
-        return new FlussMetadata(catalogName, hdfsEnvironment, this.connection, this.admin);
+        return new FlussMetadata(catalogName, hdfsEnvironment, this.connection, this.admin, tableProperties);
     }
 
     @Override
