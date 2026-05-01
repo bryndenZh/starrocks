@@ -46,6 +46,7 @@ import org.apache.fluss.client.admin.Admin;
 import org.apache.fluss.client.initializer.BucketOffsetsRetrieverImpl;
 import org.apache.fluss.client.initializer.LatestOffsetsInitializer;
 import org.apache.fluss.client.initializer.OffsetsInitializer;
+import org.apache.fluss.config.Configuration;
 import org.apache.fluss.flink.lake.LakeSplitGenerator;
 import org.apache.fluss.flink.lake.split.LakeSnapshotSplit;
 import org.apache.fluss.flink.source.split.LogSplit;
@@ -212,7 +213,7 @@ public class FlussMetadata implements ConnectorMetadata {
                 fullSchema.add(column);
             }
             String comment = tableInfo.getComment().orElse("");
-            Configuration beConf = new Configuration(connection.getConfiguration().toMap());
+            Configuration beConf = Configuration.fromMap(connection.getConfiguration().toMap());
             for (Map.Entry<String, String> e : tableInfo.getProperties().toMap().entrySet()) {
                 beConf.setString(e.getKey(), e.getValue());
             }
