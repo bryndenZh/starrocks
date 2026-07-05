@@ -180,7 +180,7 @@ public class FlussMetadata implements ConnectorMetadata {
         }
         try {
             this.admin.getDatabaseInfo(dbName);
-            Database db = new Database(CONNECTOR_ID_GENERATOR.getNextId().asInt(), dbName);
+            Database db = new Database(CONNECTOR_ID_GENERATOR.getNextId().asLong(), dbName);
             this.databases.put(dbName, db);
             return db;
         } catch (Exception e) {

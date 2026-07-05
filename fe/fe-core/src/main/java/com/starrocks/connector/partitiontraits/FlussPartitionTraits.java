@@ -15,12 +15,24 @@
 package com.starrocks.connector.partitiontraits;
 
 import com.starrocks.catalog.FlussTable;
+import com.starrocks.catalog.HivePartitionKey;
+import com.starrocks.catalog.PartitionKey;
 import com.starrocks.connector.PartitionInfo;
 import com.starrocks.server.GlobalStateMgr;
 
 import java.util.List;
 
 public class FlussPartitionTraits extends DefaultTraits {
+    @Override
+    public boolean isSupportPCTRefresh() {
+        return false;
+    }
+
+    @Override
+    public PartitionKey createEmptyKey() {
+        return new HivePartitionKey();
+    }
+
     @Override
     public List<PartitionInfo> getPartitions(List<String> partitionNames) {
         FlussTable flussTable = (FlussTable) table;

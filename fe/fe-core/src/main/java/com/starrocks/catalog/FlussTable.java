@@ -55,7 +55,7 @@ public class FlussTable extends Table {
 
     public FlussTable(String catalogName, String dbName, String tblName, List<Column> schema,
                       org.apache.fluss.client.table.Table nativeFlussTable, Configuration configuration) {
-        super(CONNECTOR_ID_GENERATOR.getNextId().asInt(), tblName, TableType.FLUSS, schema);
+        super(CONNECTOR_ID_GENERATOR.getNextId().asLong(), tblName, TableType.FLUSS, schema);
         this.catalogName = catalogName;
         this.databaseName = dbName;
         this.tableName = tblName;
