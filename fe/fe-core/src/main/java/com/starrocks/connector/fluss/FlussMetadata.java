@@ -49,7 +49,6 @@ import org.apache.fluss.client.initializer.LatestOffsetsInitializer;
 import org.apache.fluss.client.initializer.OffsetsInitializer;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.flink.lake.LakeSplitGenerator;
-import org.apache.fluss.flink.lake.split.LakeSnapshotSplit;
 import org.apache.fluss.flink.source.split.LogSplit;
 import org.apache.fluss.flink.source.split.SourceSplitBase;
 import org.apache.fluss.lake.source.LakeSource;
@@ -330,7 +329,8 @@ public class FlussMetadata implements ConnectorMetadata {
                         catalogName, flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), e.getMessage());
             }
             if (flussTable.getTableNamePrefix().equals(LAKE_TABLE_SPLITTER)) {
-                splits = splits.stream().filter(sp -> sp instanceof LakeSnapshotSplit)
+                // Primary-key lake reads use LakeSnapshotAndFlussLogSplit, which is also a lake split.
+                splits = splits.stream().filter(SourceSplitBase::isLakeSplit)
                         .collect(Collectors.toList());
             }
             if (flussTable.getTableNamePrefix().equals(RT_TABLE_SPLITTER)) {
