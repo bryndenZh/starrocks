@@ -22,9 +22,10 @@ import com.starrocks.catalog.FlussTable;
 import com.starrocks.catalog.PartitionKey;
 import com.starrocks.catalog.Table;
 import com.starrocks.common.tvr.TvrVersionRange;
+import com.starrocks.common.util.TimeUtils;
 import com.starrocks.connector.ColumnTypeConverter;
-import com.starrocks.connector.ConnectorMetadatRequestContext;
 import com.starrocks.connector.ConnectorMetadata;
+import com.starrocks.connector.ConnectorMetadataRequestContext;
 import com.starrocks.connector.GetRemoteFilesParams;
 import com.starrocks.connector.HdfsEnvironment;
 import com.starrocks.connector.PartitionInfo;
@@ -61,17 +62,20 @@ import org.apache.fluss.utils.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static com.starrocks.connector.ConnectorTableId.CONNECTOR_ID_GENERATOR;
+import static com.starrocks.connector.PartitionUtil.toHivePartitionName;
 import static org.apache.fluss.flink.utils.CatalogExceptionUtils.isTableNotExist;
 import static org.apache.fluss.flink.utils.CatalogExceptionUtils.isTableNotPartitioned;
 import static org.apache.fluss.flink.utils.LakeSourceUtils.createLakeSource;
@@ -136,8 +140,9 @@ public class FlussMetadata implements ConnectorMetadata {
             List<org.apache.fluss.metadata.PartitionInfo> flussPartitions =
                     admin.listPartitionInfos(identifier).get();
             for (org.apache.fluss.metadata.PartitionInfo partitionInfo : flussPartitions) {
-                Partition srPartition = new Partition(partitionInfo.getPartitionName(), System.currentTimeMillis());
-                this.partitionInfos.get(identifier).put(srPartition.getPartitionName(), srPartition);
+                String qualifiedName = partitionInfo.getResolvedPartitionSpec().getPartitionQualifiedName();
+                Partition srPartition = new Partition(qualifiedName, System.currentTimeMillis());
+                this.partitionInfos.get(identifier).put(qualifiedName, srPartition);
             }
         } catch (Exception e) {
             Throwable t = ExceptionUtils.stripExecutionException(e);
@@ -159,7 +164,7 @@ public class FlussMetadata implements ConnectorMetadata {
 
     @Override
     public List<String> listPartitionNames(String databaseName, String tableName,
-                                           ConnectorMetadatRequestContext requestContext) {
+                                           ConnectorMetadataRequestContext requestContext) {
         TablePath identifier = TablePath.of(databaseName, tableName);
         updatePartitionInfo(databaseName, tableName);
         if (this.partitionInfos.get(identifier) == null) {
@@ -278,12 +283,35 @@ public class FlussMetadata implements ConnectorMetadata {
             Map<String, String> properties = new HashMap<>(flussTable.getTableInfo().getProperties().toMap());
             properties.putAll(tableProperties);
 
-            Supplier<Set<org.apache.fluss.metadata.PartitionInfo>> listPartitionSupplier =
-                    () -> new LinkedHashSet<>(listFlussPartitions(table));
             LakeSource<LakeSplit> lakeSource =
                     createLakeSource(flussTable.getTableInfo().getTablePath(), properties);
             if (lakeSource != null) {
-                applyLakeSourceFilters(lakeSource, flussTable, params.getPredicate());
+                try {
+                    applyLakeSourceFilters(lakeSource, flussTable, params.getPredicate());
+                } catch (Exception e) {
+                    LOG.warn("Failed to push down predicates to lake source for table {}, " +
+                            "falling back to scan without filter pushdown", identifier, e);
+                }
+            }
+
+            Set<String> selectedPartitionNames = params.getPartitionKeys() == null ? null :
+                    params.getPartitionKeys().stream()
+                            .filter(Objects::nonNull)
+                            .map(partitionKey -> toHivePartitionName(
+                                    flussTable.getPartitionColumnNames(), partitionKey))
+                            .collect(Collectors.toSet());
+            Supplier<Set<org.apache.fluss.metadata.PartitionInfo>> listPartitionSupplier;
+            if (flussTable.isUnPartitioned()) {
+                listPartitionSupplier = LinkedHashSet::new;
+            } else if (selectedPartitionNames == null) {
+                listPartitionSupplier = () -> new LinkedHashSet<>(listFlussPartitions(table));
+            } else if (selectedPartitionNames.isEmpty()) {
+                listPartitionSupplier = LinkedHashSet::new;
+            } else {
+                listPartitionSupplier = () -> listFlussPartitions(table).stream()
+                        .filter(p -> selectedPartitionNames.contains(
+                                p.getResolvedPartitionSpec().getPartitionQualifiedName()))
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
             }
             LakeSplitGenerator lakeSplitGenerator = new LakeSplitGenerator(
                     tableInfo, admin,
@@ -326,7 +354,8 @@ public class FlussMetadata implements ConnectorMetadata {
     private void applyLakeSourceFilters(LakeSource<LakeSplit> lakeSource, FlussTable flussTable,
                                         ScalarOperator predicate) {
         RowType flussRowType = flussTable.getTableInfo().getRowType();
-        FlussPredicateConverter lakeConverter = new FlussPredicateConverter(flussRowType);
+        ZoneId sessionZoneId = ZoneId.of(TimeUtils.getSessionTimeZone());
+        FlussPredicateConverter lakeConverter = new FlussPredicateConverter(flussRowType, sessionZoneId);
         List<org.apache.fluss.predicate.Predicate> lakePredicates = new ArrayList<>();
 
         List<ScalarOperator> scalarOperators = Utils.extractConjuncts(predicate);

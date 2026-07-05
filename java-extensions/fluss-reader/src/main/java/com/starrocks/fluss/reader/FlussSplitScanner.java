@@ -46,6 +46,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -53,9 +54,24 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class FlussSplitScanner extends ConnectorScanner {
     private static final Logger LOG = LogManager.getLogger(FlussSplitScanner.class);
     private static final Base64.Decoder BASE64_DECODER = Base64.getUrlDecoder();
+    private static final ConcurrentHashMap<String, Connection> CONNECTION_CACHE = new ConcurrentHashMap<>();
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            for (Connection connection : CONNECTION_CACHE.values()) {
+                try {
+                    connection.close();
+                } catch (Exception e) {
+                    // best effort during JVM shutdown
+                }
+            }
+            CONNECTION_CACHE.clear();
+        }, "fluss-reader-connection-cleanup"));
+    }
 
     private final String splitInfo;
     private final String tableConf;
+    private final String catalogName;
     private final String dbName;
     private final String tableName;
     private final String timeZone;
@@ -76,6 +92,7 @@ public class FlussSplitScanner extends ConnectorScanner {
         this.requiredFields = ScannerHelper.splitAndOmitEmptyStrings(params.get("required_fields"), ",");
         this.splitInfo = params.get("split_info");
         this.tableConf = params.get("table_conf");
+        this.catalogName = params.get("catalog_name");
         this.dbName = params.get("db_name");
         this.tableName = params.get("table_name");
         this.timeZone = params.get("time_zone");
@@ -86,7 +103,8 @@ public class FlussSplitScanner extends ConnectorScanner {
     public void open() throws IOException {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
             Configuration conf = decodeStringToObject(tableConf);
-            connection = ConnectionFactory.createConnection(conf);
+            String cacheKey = getConnectionCacheKey();
+            connection = CONNECTION_CACHE.computeIfAbsent(cacheKey, ignoredKey -> ConnectionFactory.createConnection(conf));
             table = connection.getTable(TablePath.of(dbName, tableName));
 
             RowType rowType = table.getTableInfo().getRowType();
@@ -163,9 +181,7 @@ public class FlussSplitScanner extends ConnectorScanner {
             if (table != null) {
                 table.close();
             }
-            if (connection != null) {
-                connection.close();
-            }
+            connection = null;
         } catch (Exception e) {
             String msg = "Failed to close the fluss reader for " + dbName + "." + tableName;
             LOG.error(msg, e);
@@ -210,6 +226,11 @@ public class FlussSplitScanner extends ConnectorScanner {
         } catch (Exception e) {
             throw new RuntimeException("Failed to decode object from string", e);
         }
+    }
+
+    private String getConnectionCacheKey() {
+        String keyPrefix = catalogName == null || catalogName.isEmpty() ? dbName + "." + tableName : catalogName;
+        return keyPrefix + ":" + Integer.toHexString(tableConf.hashCode());
     }
 
     @Override

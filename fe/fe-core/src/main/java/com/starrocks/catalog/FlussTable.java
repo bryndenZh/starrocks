@@ -144,6 +144,7 @@ public class FlussTable extends Table {
         TFlussTable tFlussTable = new TFlussTable();
         tFlussTable.setTable_conf(encodeObjectToString(this.configuration));
         tFlussTable.setTime_zone(TimeUtils.getSessionTimeZone());
+        tFlussTable.setCatalog_name(this.catalogName);
 
         TTableDescriptor tTableDescriptor = new TTableDescriptor(id, TTableType.FLUSS_TABLE,
                 fullSchema.size(), 0, tableName, databaseName);

@@ -695,6 +695,9 @@ struct TFlussTable {
 
     // timezone
     2: optional string time_zone
+
+    // StarRocks catalog name, used by BE Java reader to reuse Fluss connections.
+    3: optional string catalog_name
 }
 
 struct TDeltaLakeTable {

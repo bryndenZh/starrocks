@@ -589,6 +589,7 @@ std::unique_ptr<JniScanner> create_fluss_jni_scanner(const JniScanner::CreateOpt
     jni_scanner_params["table_name"] = fluss_table->name();
     jni_scanner_params["table_conf"] = fluss_table->get_table_conf();
     jni_scanner_params["time_zone"] = fluss_table->get_time_zone();
+    jni_scanner_params["catalog_name"] = fluss_table->get_catalog_name();
 
     std::string scanner_factory_class = "com/starrocks/fluss/reader/FlussSplitScannerFactory";
     return std::make_unique<JniScanner>(scanner_factory_class, jni_scanner_params);

@@ -208,10 +208,12 @@ public:
     bool has_partition() const override { return false; }
     std::string_view get_table_conf() const;
     std::string_view get_time_zone() const;
+    std::string_view get_catalog_name() const;
 
 private:
     std::pmr::string _table_conf;
     std::pmr::string _time_zone;
+    std::pmr::string _catalog_name;
 };
 
 class OdpsTableDescriptor : public HiveTableDescriptor {

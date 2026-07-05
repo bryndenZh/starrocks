@@ -18,10 +18,11 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.starrocks.catalog.FlussTable;
+import com.starrocks.catalog.PartitionKey;
 import com.starrocks.common.profile.Timer;
 import com.starrocks.common.profile.Tracers;
 import com.starrocks.connector.CatalogConnector;
-import com.starrocks.connector.ConnectorMetadatRequestContext;
+import com.starrocks.connector.ConnectorMetadataRequestContext;
 import com.starrocks.connector.GetRemoteFilesParams;
 import com.starrocks.connector.RemoteFileInfo;
 import com.starrocks.connector.fluss.FlussRemoteFileDesc;
@@ -111,11 +112,19 @@ public class FlussScanNode extends ScanNode {
                                         long limit) throws IOException {
         List<String> fieldNames =
                 tupleDescriptor.getSlots().stream().map(s -> s.getColumn().getName()).collect(Collectors.toList());
-        GetRemoteFilesParams params = GetRemoteFilesParams.newBuilder()
+        GetRemoteFilesParams.Builder paramsBuilder = GetRemoteFilesParams.newBuilder()
                 .setPredicate(predicate)
                 .setFieldNames(fieldNames)
-                .setLimit(limit)
-                .build();
+                .setLimit(limit);
+        if (!flussTable.isUnPartitioned()) {
+            List<PartitionKey> partitionKeys = new ArrayList<>();
+            for (long partitionId : scanNodePredicates.getSelectedPartitionIds()) {
+                PartitionKey partitionKey = scanNodePredicates.getIdToPartitionKey().get(partitionId);
+                partitionKeys.add(partitionKey);
+            }
+            paramsBuilder.setPartitionKeys(partitionKeys);
+        }
+        GetRemoteFilesParams params = paramsBuilder.build();
         List<RemoteFileInfo> fileInfos;
         try (Timer ignored = Tracers.watchScope(EXTERNAL,
                 flussTable.getCatalogTableName() + ".getFlussRemoteFileInfos")) {
@@ -219,7 +228,7 @@ public class FlussScanNode extends ScanNode {
 
             List<String> partitionNames = GlobalStateMgr.getCurrentState().getMetadataMgr().listPartitionNames(
                     flussTable.getCatalogName(), flussTable.getCatalogDBName(), flussTable.getCatalogTableName(),
-                    ConnectorMetadatRequestContext.DEFAULT);
+                    ConnectorMetadataRequestContext.DEFAULT);
             output.append(prefix).append(
                     String.format("partitions=%s/%s", scanNodePredicates.getSelectedPartitionIds().size(),
                             partitionNames.size() == 0 ? 1 : partitionNames.size()));

@@ -276,7 +276,8 @@ FlussTableDescriptor::FlussTableDescriptor(const TTableDescriptor& tdesc, Object
                                            std::pmr::memory_resource* mr)
         : HiveTableDescriptor(tdesc, pool, mr),
           _table_conf(tdesc.flussTable.table_conf, mr),
-          _time_zone(tdesc.flussTable.time_zone, mr) {}
+          _time_zone(tdesc.flussTable.time_zone, mr),
+          _catalog_name(tdesc.flussTable.catalog_name, mr) {}
 
 std::string_view FlussTableDescriptor::get_table_conf() const {
     return _table_conf;
@@ -284,6 +285,10 @@ std::string_view FlussTableDescriptor::get_table_conf() const {
 
 std::string_view FlussTableDescriptor::get_time_zone() const {
     return _time_zone;
+}
+
+std::string_view FlussTableDescriptor::get_catalog_name() const {
+    return _catalog_name;
 }
 
 OdpsTableDescriptor::OdpsTableDescriptor(const TTableDescriptor& tdesc, ObjectPool* pool, std::pmr::memory_resource* mr)
