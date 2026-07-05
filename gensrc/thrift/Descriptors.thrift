@@ -690,8 +690,8 @@ struct TPaimonTable {
 }
 
 struct TFlussTable {
-    // fluss table conf
-    1: optional string table_conf
+    // Encoded catalog-level Fluss client configuration; used by BE to build the connection.
+    1: optional string catalog_conf
 
     // timezone
     2: optional string time_zone

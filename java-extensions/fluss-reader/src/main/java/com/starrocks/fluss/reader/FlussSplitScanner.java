@@ -70,7 +70,7 @@ public class FlussSplitScanner extends ConnectorScanner {
     }
 
     private final String splitInfo;
-    private final String tableConf;
+    private final String catalogConf;
     private final String catalogName;
     private final String dbName;
     private final String tableName;
@@ -91,7 +91,7 @@ public class FlussSplitScanner extends ConnectorScanner {
         this.fetchSize = fetchSize;
         this.requiredFields = ScannerHelper.splitAndOmitEmptyStrings(params.get("required_fields"), ",");
         this.splitInfo = params.get("split_info");
-        this.tableConf = params.get("table_conf");
+        this.catalogConf = params.get("catalog_conf");
         this.catalogName = params.get("catalog_name");
         this.dbName = params.get("db_name");
         this.tableName = params.get("table_name");
@@ -102,7 +102,7 @@ public class FlussSplitScanner extends ConnectorScanner {
     @Override
     public void open() throws IOException {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
-            Configuration conf = decodeStringToObject(tableConf);
+            Configuration conf = decodeStringToObject(catalogConf);
             String cacheKey = getConnectionCacheKey();
             connection = CONNECTION_CACHE.computeIfAbsent(cacheKey, ignoredKey -> ConnectionFactory.createConnection(conf));
             table = connection.getTable(TablePath.of(dbName, tableName));
@@ -230,7 +230,7 @@ public class FlussSplitScanner extends ConnectorScanner {
 
     private String getConnectionCacheKey() {
         String keyPrefix = catalogName == null || catalogName.isEmpty() ? dbName + "." + tableName : catalogName;
-        return keyPrefix + ":" + Integer.toHexString(tableConf.hashCode());
+        return keyPrefix + ":" + Integer.toHexString(catalogConf.hashCode());
     }
 
     @Override

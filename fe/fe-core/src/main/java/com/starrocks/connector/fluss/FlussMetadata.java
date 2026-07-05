@@ -94,15 +94,15 @@ public class FlussMetadata implements ConnectorMetadata {
     private final Map<String, Database> databases = new ConcurrentHashMap<>();
     private final Map<TablePath, Map<String, Partition>> partitionInfos = new ConcurrentHashMap<>();
     private final Map<PredicateSearchKey, List<SourceSplitBase>> flussSplits = new ConcurrentHashMap<>();
-    private final Map<String, String> tableProperties;
+    private final Map<String, String> catalogProperties;
 
     public FlussMetadata(String catalogName, HdfsEnvironment hdfsEnvironment, Connection connection, Admin admin,
-                         Map<String, String> tableProperties) {
+                         Map<String, String> catalogProperties) {
         this.catalogName = catalogName;
         this.hdfsEnvironment = hdfsEnvironment;
         this.connection = connection;
         this.admin = admin;
-        this.tableProperties = tableProperties;
+        this.catalogProperties = catalogProperties;
     }
 
     @Override
@@ -221,7 +221,7 @@ public class FlussMetadata implements ConnectorMetadata {
             for (Map.Entry<String, String> e : tableInfo.getProperties().toMap().entrySet()) {
                 beConf.setString(e.getKey(), e.getValue());
             }
-            for (Map.Entry<String, String> e : tableProperties.entrySet()) {
+            for (Map.Entry<String, String> e : catalogProperties.entrySet()) {
                 beConf.setString(e.getKey(), e.getValue());
             }
             FlussTable table = new FlussTable(catalogName, dbName, realTblName, fullSchema,
@@ -280,7 +280,7 @@ public class FlussMetadata implements ConnectorMetadata {
 
         if (!flussSplits.containsKey(filter)) {
             Map<String, String> properties = new HashMap<>(flussTable.getTableInfo().getProperties().toMap());
-            properties.putAll(tableProperties);
+            properties.putAll(catalogProperties);
 
             LakeSource<LakeSplit> lakeSource =
                     createLakeSource(flussTable.getTableInfo().getTablePath(), properties);
@@ -329,7 +329,7 @@ public class FlussMetadata implements ConnectorMetadata {
                         catalogName, flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), e.getMessage());
             }
             if (flussTable.getTableNamePrefix().equals(LAKE_TABLE_SPLITTER)) {
-                // Primary-key lake reads use LakeSnapshotAndFlussLogSplit, which is also a lake split.
+                // Flink supports $lake reads on primary-key tables via LakeSnapshotAndFlussLogSplit.
                 splits = splits.stream().filter(SourceSplitBase::isLakeSplit)
                         .collect(Collectors.toList());
             }

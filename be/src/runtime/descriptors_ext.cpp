@@ -275,12 +275,12 @@ std::string_view PaimonTableDescriptor::get_time_zone() const {
 FlussTableDescriptor::FlussTableDescriptor(const TTableDescriptor& tdesc, ObjectPool* pool,
                                            std::pmr::memory_resource* mr)
         : HiveTableDescriptor(tdesc, pool, mr),
-          _table_conf(tdesc.flussTable.table_conf, mr),
+          _catalog_conf(tdesc.flussTable.catalog_conf, mr),
           _time_zone(tdesc.flussTable.time_zone, mr),
           _catalog_name(tdesc.flussTable.catalog_name, mr) {}
 
-std::string_view FlussTableDescriptor::get_table_conf() const {
-    return _table_conf;
+std::string_view FlussTableDescriptor::get_catalog_conf() const {
+    return _catalog_conf;
 }
 
 std::string_view FlussTableDescriptor::get_time_zone() const {

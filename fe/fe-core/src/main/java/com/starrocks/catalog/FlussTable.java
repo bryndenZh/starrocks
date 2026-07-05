@@ -142,7 +142,7 @@ public class FlussTable extends Table {
     @Override
     public TTableDescriptor toThrift(List<DescriptorTable.ReferencedPartitionInfo> partitions) {
         TFlussTable tFlussTable = new TFlussTable();
-        tFlussTable.setTable_conf(encodeObjectToString(this.configuration));
+        tFlussTable.setCatalog_conf(encodeObjectToString(this.configuration));
         tFlussTable.setTime_zone(TimeUtils.getSessionTimeZone());
         tFlussTable.setCatalog_name(this.catalogName);
 

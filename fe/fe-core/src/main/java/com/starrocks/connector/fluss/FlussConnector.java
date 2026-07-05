@@ -37,7 +37,7 @@ public class FlussConnector implements Connector {
     private final Admin admin;
     private final HdfsEnvironment hdfsEnvironment;
     private final String catalogName;
-    private final Map<String, String> tableProperties;
+    private final Map<String, String> catalogProperties;
 
     public FlussConnector(ConnectorContext context) {
         this.catalogName = context.getCatalogName();
@@ -60,7 +60,8 @@ public class FlussConnector implements Connector {
             conf.setString(key, properties.get(k));
         }
 
-        this.tableProperties = properties.entrySet().stream()
+        // These catalog-level lake options are not stored in Fluss table metadata.
+        this.catalogProperties = properties.entrySet().stream()
                 .filter(e -> e.getKey().startsWith(LAKE_PAIMON_PREFIX))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
@@ -70,7 +71,7 @@ public class FlussConnector implements Connector {
 
     @Override
     public ConnectorMetadata getMetadata() {
-        return new FlussMetadata(catalogName, hdfsEnvironment, this.connection, this.admin, tableProperties);
+        return new FlussMetadata(catalogName, hdfsEnvironment, this.connection, this.admin, catalogProperties);
     }
 
     @Override
