@@ -16,7 +16,6 @@ package com.starrocks.planner;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import com.starrocks.catalog.FlussTable;
 import com.starrocks.catalog.PartitionKey;
 import com.starrocks.common.profile.Timer;
@@ -53,7 +52,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static com.starrocks.common.profile.Tracers.Module.EXTERNAL;
@@ -62,7 +60,6 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class FlussScanNode extends ScanNode {
     private static final Logger LOG = LogManager.getLogger(FlussScanNode.class);
-    private final AtomicLong partitionIdGen = new AtomicLong(0L);
     private final FlussTable flussTable;
     private final HDFSScanNodePredicates scanNodePredicates = new HDFSScanNodePredicates();
     private final List<TScanRangeLocations> scanRangeLocationsList = new ArrayList<>();
@@ -116,14 +113,18 @@ public class FlussScanNode extends ScanNode {
                 .setPredicate(predicate)
                 .setFieldNames(fieldNames)
                 .setLimit(limit);
+        List<PartitionKey> partitionKeys = new ArrayList<>();
         if (!flussTable.isUnPartitioned()) {
-            List<PartitionKey> partitionKeys = new ArrayList<>();
             for (long partitionId : scanNodePredicates.getSelectedPartitionIds()) {
                 PartitionKey partitionKey = scanNodePredicates.getIdToPartitionKey().get(partitionId);
                 partitionKeys.add(partitionKey);
             }
             paramsBuilder.setPartitionKeys(partitionKeys);
         }
+        LOG.debug("Fluss scan remote file params table={}.{}, selectedPartitionIds={}, partitionKeys={}, " +
+                        "predicate={}, fieldNames={}, limit={}",
+                flussTable.getCatalogDBName(), flussTable.getCatalogTableName(),
+                scanNodePredicates.getSelectedPartitionIds(), partitionKeys, predicate, fieldNames, limit);
         GetRemoteFilesParams params = paramsBuilder.build();
         List<RemoteFileInfo> fileInfos;
         try (Timer ignored = Tracers.watchScope(EXTERNAL,
@@ -133,6 +134,8 @@ public class FlussScanNode extends ScanNode {
 
         FlussRemoteFileDesc remoteFileDesc = (FlussRemoteFileDesc) fileInfos.get(0).getFiles().get(0);
         List<SourceSplitBase> splits = remoteFileDesc.getFlussSplitsInfo();
+        LOG.debug("Fluss scan remote file result table={}.{}, splitCount={}",
+                flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), splits.size());
 
         if (splits.isEmpty()) {
             LOG.warn("There is no fluss splits on {}.{} and predicate: [{}]",
@@ -140,15 +143,9 @@ public class FlussScanNode extends ScanNode {
             return;
         }
 
-        Map<String, Long> selectedPartitions = Maps.newHashMap();
         for (SourceSplitBase split : splits) {
-            String partitionValue = split.getPartitionName();
-            if (!selectedPartitions.containsKey(partitionValue)) {
-                selectedPartitions.put(partitionValue, nextPartitionId());
-            }
             addSplitScanRangeLocations(split);
         }
-        scanNodePredicates.setSelectedPartitionIds(selectedPartitions.values());
         traceReaderMetrics();
     }
 
@@ -176,10 +173,6 @@ public class FlussScanNode extends ScanNode {
         scanRangeLocations.addToLocations(scanRangeLocation);
 
         scanRangeLocationsList.add(scanRangeLocations);
-    }
-
-    private long nextPartitionId() {
-        return partitionIdGen.getAndIncrement();
     }
 
     @Override

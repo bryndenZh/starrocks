@@ -690,8 +690,9 @@ struct TPaimonTable {
 }
 
 struct TFlussTable {
-    // Encoded catalog-level Fluss client configuration; used by BE to build the connection.
-    1: optional string catalog_conf
+    // Encoded scan-time configuration. FE merges catalog-level options and table properties;
+    // BE forwards this to the Java reader for Fluss connection and lake-source setup.
+    1: optional string runtime_conf
 
     // timezone
     2: optional string time_zone

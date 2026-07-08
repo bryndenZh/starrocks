@@ -587,7 +587,7 @@ std::unique_ptr<JniScanner> create_fluss_jni_scanner(const JniScanner::CreateOpt
     jni_scanner_params["split_info"] = scan_range.fluss_split_info;
     jni_scanner_params["db_name"] = fluss_table->database();
     jni_scanner_params["table_name"] = fluss_table->name();
-    jni_scanner_params["catalog_conf"] = fluss_table->get_catalog_conf();
+    jni_scanner_params["runtime_conf"] = fluss_table->get_runtime_conf();
     jni_scanner_params["time_zone"] = fluss_table->get_time_zone();
     jni_scanner_params["catalog_name"] = fluss_table->get_catalog_name();
 
