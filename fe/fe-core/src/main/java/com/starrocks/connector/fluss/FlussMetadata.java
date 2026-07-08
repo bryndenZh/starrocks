@@ -55,6 +55,7 @@ import org.apache.fluss.lake.source.LakeSplit;
 import org.apache.fluss.metadata.Schema;
 import org.apache.fluss.metadata.TableInfo;
 import org.apache.fluss.metadata.TablePath;
+import org.apache.fluss.predicate.Predicate;
 import org.apache.fluss.types.RowType;
 import org.apache.fluss.utils.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
@@ -62,6 +63,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +94,8 @@ public class FlussMetadata implements ConnectorMetadata {
     private final Map<TablePath, Table> tables = new ConcurrentHashMap<>();
     private final Map<String, Database> databases = new ConcurrentHashMap<>();
     private final Map<TablePath, Map<String, Partition>> partitionInfos = new ConcurrentHashMap<>();
+    private final Map<TablePath, Map<String, org.apache.fluss.metadata.PartitionInfo>> flussPartitionInfos =
+            new ConcurrentHashMap<>();
     // Catalog-level Fluss/lake options copied from CREATE EXTERNAL CATALOG.
     private final Configuration catalogConf;
 
@@ -129,19 +133,21 @@ public class FlussMetadata implements ConnectorMetadata {
         }
     }
 
-    private void updatePartitionInfo(String databaseName, String tableName) {
+    private Map<String, org.apache.fluss.metadata.PartitionInfo> loadPartitionInfo(String databaseName, String tableName) {
+        TablePath identifier = TablePath.of(databaseName, tableName);
         try {
-            TablePath identifier = TablePath.of(databaseName, tableName);
-            if (!this.partitionInfos.containsKey(identifier)) {
-                this.partitionInfos.put(identifier, new ConcurrentHashMap<>());
-            }
             List<org.apache.fluss.metadata.PartitionInfo> flussPartitions =
                     admin.listPartitionInfos(identifier).get();
+            Map<String, org.apache.fluss.metadata.PartitionInfo> flussPartitionMap = new LinkedHashMap<>();
+            Map<String, Partition> srPartitionMap = new LinkedHashMap<>();
             for (org.apache.fluss.metadata.PartitionInfo partitionInfo : flussPartitions) {
                 String qualifiedName = partitionInfo.getResolvedPartitionSpec().getPartitionQualifiedName();
                 Partition srPartition = new Partition(qualifiedName, System.currentTimeMillis());
-                this.partitionInfos.get(identifier).put(qualifiedName, srPartition);
+                flussPartitionMap.put(qualifiedName, partitionInfo);
+                srPartitionMap.put(qualifiedName, srPartition);
             }
+            this.partitionInfos.put(identifier, srPartitionMap);
+            return flussPartitionMap;
         } catch (Exception e) {
             Throwable t = ExceptionUtils.stripExecutionException(e);
             if (isTableNotExist(t)) {
@@ -151,6 +157,8 @@ public class FlussMetadata implements ConnectorMetadata {
             } else if (isTableNotPartitioned(t)) {
                 LOG.debug("Skip listing Fluss partition names for unpartitioned table {}.{}.{}.",
                         catalogName, databaseName, tableName);
+                this.partitionInfos.put(identifier, new LinkedHashMap<>());
+                return new LinkedHashMap<>();
             } else {
                 LOG.error("Failed to list Fluss partition names {}.{}.{}.",
                         catalogName, databaseName, tableName, e);
@@ -163,11 +171,9 @@ public class FlussMetadata implements ConnectorMetadata {
     public List<String> listPartitionNames(String databaseName, String tableName,
                                            ConnectorMetadataRequestContext requestContext) {
         TablePath identifier = TablePath.of(databaseName, tableName);
-        updatePartitionInfo(databaseName, tableName);
-        if (this.partitionInfos.get(identifier) == null) {
-            return Lists.newArrayList();
-        }
-        return new ArrayList<>(this.partitionInfos.get(identifier).keySet());
+        Map<String, org.apache.fluss.metadata.PartitionInfo> partitionInfo =
+                flussPartitionInfos.computeIfAbsent(identifier, ignored -> loadPartitionInfo(databaseName, tableName));
+        return new ArrayList<>(partitionInfo.keySet());
     }
 
     @Override
@@ -244,12 +250,10 @@ public class FlussMetadata implements ConnectorMetadata {
     private List<org.apache.fluss.metadata.PartitionInfo> listFlussPartitions(Table table) {
         FlussTable flussTable = (FlussTable) table;
         TablePath identifier = TablePath.of(flussTable.getCatalogDBName(), flussTable.getCatalogTableName());
-        try {
-            return admin.listPartitionInfos(identifier).get();
-        } catch (Exception e) {
-            throw new StarRocksConnectorException(
-                    String.format("Failed to list partitions for %s", identifier));
-        }
+        Map<String, org.apache.fluss.metadata.PartitionInfo> partitionInfo =
+                flussPartitionInfos.computeIfAbsent(identifier, ignored -> loadPartitionInfo(
+                        flussTable.getCatalogDBName(), flussTable.getCatalogTableName()));
+        return new ArrayList<>(partitionInfo.values());
     }
 
     @Override
@@ -262,14 +266,19 @@ public class FlussMetadata implements ConnectorMetadata {
         OffsetsInitializer.BucketOffsetsRetriever bucketOffsetsRetriever =
                 new BucketOffsetsRetrieverImpl(admin, identifier);
 
+        List<Predicate> lakePredicates = Lists.newArrayList();
         LakeSource<LakeSplit> lakeSource =
                 createLakeSource(flussTable.getTableInfo().getTablePath(), flussTable.buildRuntimeConf().toMap());
         if (lakeSource != null) {
             try {
-                applyLakeSourceFilters(lakeSource, flussTable, params.getPredicate());
+                lakePredicates = convertLakePredicates(flussTable, params.getPredicate());
+                if (!lakePredicates.isEmpty()) {
+                    lakeSource.withFilters(lakePredicates);
+                }
             } catch (Exception e) {
                 LOG.warn("Failed to push down predicates to lake source for table {}, " +
                         "falling back to scan without filter pushdown", identifier, e);
+                lakePredicates = Lists.newArrayList();
             }
         }
 
@@ -348,8 +357,9 @@ public class FlussMetadata implements ConnectorMetadata {
                     .collect(Collectors.toList());
         }
 
+        FlussSplitsInfo flussSplitsInfo = new FlussSplitsInfo(lakePredicates, splits);
         List<RemoteFileDesc> remoteFileDescs = ImmutableList.of(
-                FlussRemoteFileDesc.createFlussRemoteFileDesc(splits));
+                FlussRemoteFileDesc.createFlussRemoteFileDesc(flussSplitsInfo));
         remoteFileInfo.setFiles(remoteFileDescs);
         return Lists.newArrayList(remoteFileInfo);
     }
@@ -387,24 +397,23 @@ public class FlussMetadata implements ConnectorMetadata {
         return escaped ? "escaped:" + builder : builder.toString();
     }
 
-    private void applyLakeSourceFilters(LakeSource<LakeSplit> lakeSource, FlussTable flussTable,
-                                        ScalarOperator predicate) {
+    private List<Predicate> convertLakePredicates(FlussTable flussTable, ScalarOperator predicate) {
+        if (predicate == null) {
+            return Lists.newArrayList();
+        }
         RowType flussRowType = flussTable.getTableInfo().getRowType();
         ZoneId sessionZoneId = ZoneId.of(TimeUtils.getSessionTimeZone());
         FlussPredicateConverter lakeConverter = new FlussPredicateConverter(flussRowType, sessionZoneId);
-        List<org.apache.fluss.predicate.Predicate> lakePredicates = new ArrayList<>();
+        List<Predicate> lakePredicates = new ArrayList<>();
 
         List<ScalarOperator> scalarOperators = Utils.extractConjuncts(predicate);
         for (ScalarOperator operator : scalarOperators) {
-            org.apache.fluss.predicate.Predicate lakePredicate = lakeConverter.convert(operator);
+            Predicate lakePredicate = lakeConverter.convert(operator);
             if (lakePredicate != null) {
                 lakePredicates.add(lakePredicate);
             }
         }
-
-        if (!lakePredicates.isEmpty()) {
-            lakeSource.withFilters(lakePredicates);
-        }
+        return lakePredicates;
     }
 
     @Override
@@ -439,12 +448,13 @@ public class FlussMetadata implements ConnectorMetadata {
             return result;
         }
         Map<String, Partition> partitionInfo = this.partitionInfos.get(identifier);
+        if (partitionInfo == null) {
+            flussPartitionInfos.computeIfAbsent(identifier, ignored -> loadPartitionInfo(
+                    flussTable.getCatalogDBName(), flussTable.getCatalogTableName()));
+            partitionInfo = this.partitionInfos.get(identifier);
+        }
         for (String partitionName : partitionNames) {
-            if (partitionInfo == null || partitionInfo.get(partitionName) == null) {
-                this.updatePartitionInfo(flussTable.getCatalogDBName(), flussTable.getCatalogTableName());
-                partitionInfo = this.partitionInfos.get(identifier);
-            }
-            if (partitionInfo.get(partitionName) != null) {
+            if (partitionInfo != null && partitionInfo.get(partitionName) != null) {
                 result.add(partitionInfo.get(partitionName));
             } else {
                 LOG.warn("Cannot find the fluss partition info: {}", partitionName);

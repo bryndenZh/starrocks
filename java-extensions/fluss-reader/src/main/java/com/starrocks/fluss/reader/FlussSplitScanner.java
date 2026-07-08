@@ -31,18 +31,19 @@ import org.apache.fluss.lake.paimon.source.PaimonLakeSource;
 import org.apache.fluss.lake.source.LakeSource;
 import org.apache.fluss.lake.source.LakeSplit;
 import org.apache.fluss.metadata.TablePath;
+import org.apache.fluss.predicate.Predicate;
 import org.apache.fluss.row.InternalRow;
 import org.apache.fluss.types.DataField;
 import org.apache.fluss.types.DataType;
 import org.apache.fluss.types.RowType;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.paimon.utils.InstantiationUtil;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,7 @@ public class FlussSplitScanner extends ConnectorScanner {
     }
 
     private final String splitInfo;
+    private final String predicateInfo;
     private final String runtimeConf;
     private final String catalogName;
     private final String dbName;
@@ -91,6 +93,7 @@ public class FlussSplitScanner extends ConnectorScanner {
         this.fetchSize = fetchSize;
         this.requiredFields = ScannerHelper.splitAndOmitEmptyStrings(params.get("required_fields"), ",");
         this.splitInfo = params.get("split_info");
+        this.predicateInfo = params.get("predicate_info");
         this.runtimeConf = params.get("runtime_conf");
         this.catalogName = params.get("catalog_name");
         this.dbName = params.get("db_name");
@@ -142,6 +145,10 @@ public class FlussSplitScanner extends ConnectorScanner {
             @SuppressWarnings("unchecked")
             LakeSource<LakeSplit> lakeSource = (LakeSource<LakeSplit>) (LakeSource<?>)
                     new PaimonLakeSource(paimonConfig, TablePath.of(dbName, tableName));
+            List<Predicate> lakePredicates = decodeLakePredicates(predicateInfo);
+            if (!lakePredicates.isEmpty()) {
+                lakeSource.withFilters(lakePredicates);
+            }
             SourceSplitSerializer serializer = new SourceSplitSerializer(lakeSource);
             byte[] splitBytes = BASE64_DECODER.decode(splitInfo.getBytes(UTF_8));
             SourceSplitBase split = serializer.deserialize(0, splitBytes);
@@ -224,11 +231,19 @@ public class FlussSplitScanner extends ConnectorScanner {
     @SuppressWarnings("unchecked")
     public static <T> T decodeStringToObject(String encodedStr) {
         byte[] bytes = BASE64_DECODER.decode(encodedStr.getBytes(UTF_8));
-        try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
-            return (T) ois.readObject();
+        try {
+            return InstantiationUtil.deserializeObject(bytes, FlussSplitScanner.class.getClassLoader());
         } catch (Exception e) {
             throw new RuntimeException("Failed to decode object from string", e);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Predicate> decodeLakePredicates(String encodedStr) {
+        if (encodedStr == null || encodedStr.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return decodeStringToObject(encodedStr);
     }
 
     private String getConnectionCacheKey() {

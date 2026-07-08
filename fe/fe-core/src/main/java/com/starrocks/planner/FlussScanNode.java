@@ -25,6 +25,7 @@ import com.starrocks.connector.ConnectorMetadataRequestContext;
 import com.starrocks.connector.GetRemoteFilesParams;
 import com.starrocks.connector.RemoteFileInfo;
 import com.starrocks.connector.fluss.FlussRemoteFileDesc;
+import com.starrocks.connector.fluss.FlussSplitsInfo;
 import com.starrocks.credential.CloudConfiguration;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
@@ -133,7 +134,8 @@ public class FlussScanNode extends ScanNode {
         }
 
         FlussRemoteFileDesc remoteFileDesc = (FlussRemoteFileDesc) fileInfos.get(0).getFiles().get(0);
-        List<SourceSplitBase> splits = remoteFileDesc.getFlussSplitsInfo();
+        FlussSplitsInfo flussSplitsInfo = remoteFileDesc.getFlussSplitsInfo();
+        List<SourceSplitBase> splits = flussSplitsInfo.getFlussSplits();
         LOG.debug("Fluss scan remote file result table={}.{}, splitCount={}",
                 flussTable.getCatalogDBName(), flussTable.getCatalogTableName(), splits.size());
 
@@ -143,8 +145,9 @@ public class FlussScanNode extends ScanNode {
             return;
         }
 
+        String predicateInfo = PaimonScanNode.encodeObjectToString(flussSplitsInfo.getPredicates());
         for (SourceSplitBase split : splits) {
-            addSplitScanRangeLocations(split);
+            addSplitScanRangeLocations(split, predicateInfo);
         }
         traceReaderMetrics();
     }
@@ -154,12 +157,13 @@ public class FlussScanNode extends ScanNode {
         Tracers.record(EXTERNAL, prefix + "totalSplitNum", String.valueOf(scanRangeLocationsList.size()));
     }
 
-    public void addSplitScanRangeLocations(SourceSplitBase split) {
+    public void addSplitScanRangeLocations(SourceSplitBase split, String predicateInfo) {
         TScanRangeLocations scanRangeLocations = new TScanRangeLocations();
 
         THdfsScanRange hdfsScanRange = new THdfsScanRange();
         hdfsScanRange.setUse_fluss_jni_reader(true);
         hdfsScanRange.setFluss_split_info(encodeSplitToString(split));
+        hdfsScanRange.setJni_predicate_info(predicateInfo);
         hdfsScanRange.setFile_length(1);
         hdfsScanRange.setLength(1);
         hdfsScanRange.setFile_format(THdfsFileFormat.UNKNOWN);
